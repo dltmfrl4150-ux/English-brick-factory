@@ -21,6 +21,8 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
+
 import brick_csv
 import brick_frames
 import shadowing_render as sr
@@ -39,12 +41,16 @@ DEFAULTS = dict(
     en_wait_factor=1.5,
     block_repeat_long=1,     # 누적 문장(완성 전) 재생 횟수
     final_repeat_long=2,     # 완성 문장 재생 횟수
+    final_translation_wait_factor=1.0,   # 완성 문장 반복 전: 원래 번역 음성 뒤 정답 길이 x 배수만큼 대기
     block_repeat_shorts=1,
     final_repeat_shorts=1,
     review_wait_factor=1.5,
     review_after_ms=1000,
     step_title_ms=1000,      # STEP 1(블록학습)과 STEP 2(이어서 말해보기) 사이 제목 카드
-    room_tone=False,         # True면 무음 구간을 기존 엔진의 -64dBFS 잡음으로 채움 (블루투스 절전 방지용)
+    # 재생 장치 절전 방지: 완전한 무음이 이어지면 블루투스/HDMI 장치가 절전에 들어가 다음 음성 앞부분이 잘림.
+    # 기존 엔진의 백색 잡음(-64dBFS)은 '쉬-' 소리가 들려서, 귀에 안 들리는 30Hz 저음을 영상 전체에 깐다.
+    keep_alive_hz=30,
+    keep_alive_dbfs=-54,     # 0이면 끔 (AAC 인코딩 후에도 남는 것 확인)
     outro_ms=4000,
     shorts_target_s=175,
 )
@@ -140,11 +146,10 @@ def render_frame(spec, layout):
 class BrickTimeline(sr.Timeline):
     """기존 Timeline에서 show()/play()만 재정의: brick_frames로 그리고, 음성 뒤 유지 여백 없음."""
 
-    def __init__(self, layout, lead_pad_ms, dry=False, room_tone=False):
+    def __init__(self, layout, lead_pad_ms, dry=False):
         super().__init__()
         self.layout = layout
         self.lead_pad_ms = lead_pad_ms
-        self.room_tone = room_tone
         self.dry = dry     # True면 프레임을 그리지 않고 길이만 계산 (쇼츠 배분용)
         self.events = []   # (시작 ms, 설명) — 타이밍 검증용 로그
 
@@ -175,11 +180,22 @@ class BrickTimeline(sr.Timeline):
         self.audio += seg
 
     def silence(self, ms):
-        """기본은 완전한 무음. 기존 엔진의 잡음(룸톤)이 대기 중 '쉬-' 소리로 들려서 꺼 둠."""
-        if self.room_tone:
-            super().silence(ms)
-        else:
-            self.audio += sr.AudioSegment.silent(duration=int(ms), frame_rate=sr.SAMPLE_RATE)
+        """완전한 무음 (기존 엔진의 백색 잡음 대신). 절전 방지 신호는 add_keep_alive()가 전체에 깐다."""
+        self.audio += sr.AudioSegment.silent(duration=int(ms), frame_rate=sr.SAMPLE_RATE)
+
+    def add_keep_alive(self, hz, dbfs):
+        """영상 전체에 끊김 없는 저음 사인파를 섞는다 (구간마다 끊으면 '딱' 소리가 나므로 하나로 이어서).
+        양 끝 50ms는 서서히 키우고 줄임."""
+        n = int(len(self.audio) * sr.SAMPLE_RATE / 1000)
+        if not n or not dbfs:
+            return
+        wave = np.sin(2 * np.pi * hz * np.arange(n) / sr.SAMPLE_RATE) * 32767 * 10 ** (dbfs / 20) * np.sqrt(2)
+        fade = min(n // 2, sr.SAMPLE_RATE // 20)
+        wave[:fade] *= np.linspace(0, 1, fade)
+        wave[n - fade:] *= np.linspace(1, 0, fade)
+        tone = sr.AudioSegment(np.round(wave).astype(np.int16).tobytes(), frame_rate=sr.SAMPLE_RATE,
+                               sample_width=2, channels=1)
+        self.audio = self.audio.overlay(tone)
 
     def wait(self, ms, label=""):
         self.log_event(f"대기 {int(ms)}ms {label}")
@@ -211,7 +227,7 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
     clips.build(log)
 
     FRAME_DIR.mkdir(parents=True, exist_ok=True)
-    tl = BrickTimeline(layout, cfg["lead_pad_ms"], dry, bool(cfg["room_tone"]))
+    tl = BrickTimeline(layout, cfg["lead_pad_ms"], dry)
     mode = "shorts" if shorts else "long"
     block_repeat, final_repeat = cfg[f"block_repeat_{mode}"], cfg[f"final_repeat_{mode}"]
 
@@ -251,10 +267,14 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
                 tl.play(clips[k["meaning"][j - 1]], f"{log_s} 누적 뜻 {j}")
             tl.countdown(shown, cfg["first_block_countdown_s"] if j == 1 else cfg["next_block_countdown_s"])
             # j번 블록 공개(팝업) -> 누적 문장 음성 (완성 문장만 반복)
+            # 완성 문장 반복은 원래 번역 음성 -> 정답 길이 x final_translation_wait_factor 대기 -> 정답 음성
             seg = clips[k["prefix"][j - 1]]
             tl.show(dict(learn, meanings=j, revealed=j), pop=True)
             for r in range(final_repeat if last else block_repeat):
                 if r:
+                    tl.play(clips[k["translation"]], f"{log_s} 완성 문장 반복 전 원래 번역")
+                    tl.wait(len(seg) * cfg["final_translation_wait_factor"],
+                            f"{log_s} 정답 길이 x{cfg['final_translation_wait_factor']}")
                     tl.play(seg, f"{log_s} 누적 문장 {j} (반복)")
                 else:
                     tl.play(seg, f"{log_s} 누적 문장 {j}")
@@ -283,6 +303,8 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
             tl.mark("아웃트로")
         nxt = OUTRO_STEPS[n + 1] if n + 1 < len(OUTRO_STEPS) else 1.0
         tl.wait(cfg["outro_ms"] * (nxt - t), f"아웃트로 t={t}")
+    if not dry:
+        tl.add_keep_alive(cfg["keep_alive_hz"], cfg["keep_alive_dbfs"])
     return tl
 
 
