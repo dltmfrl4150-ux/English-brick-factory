@@ -9,7 +9,8 @@ CSV(brick_csv) -> Edge TTS -> 실제 음성 길이 기준 타임라인 -> brick_
   (명세 4장의 STEP 1~4 중 화면에 번호를 붙이는 것은 블록학습과 이어서 말해보기 두 단계)
 
 사용법:
-    python brick_render.py <CSV경로> [--group 영아] [-o 출력폴더]
+    python brick_render.py <CSV경로> [--group 영아] [-o 출력폴더]   # --group 없으면 모든 그룹
+    -> output/{topic}_{group}_롱폼_16x9.mp4 + 같은 이름 .json (제목·설명·태그·문장별 챕터)
 """
 import argparse
 import asyncio
@@ -208,7 +209,7 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
         learn = dict(base(s), kind="learn")
         log_s = f"문장 {s.sid}"
         tl.show(dict(learn, guide=True))
-        tl.mark(f"STEP 1 {s.full}" if i else f"STEP 1 블록학습 · {s.full}")
+        tl.mark(f"{brick_frames.step_text(lang, 'learn')} · {s.full}" if i == 0 else s.full)
         tl.play(clips[k["translation"]], f"{log_s} 전체 번역")
         tl.wait(len(full) * cfg["full_ko_wait_factor"], f"{log_s} 전체 정답 길이 x{cfg['full_ko_wait_factor']}")
         for j in range(1, len(s.blocks) + 1):
@@ -230,7 +231,7 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
     # STEP 2 · 이어서 말해보기 (명세 4장의 STEP 3. 쇼츠는 없음). 앞에 제목 카드
     if not shorts:
         tl.show(dict(kind="title", lang=lang, step="review"))
-        tl.mark("STEP 2 이어서 말해보기")
+        tl.mark(brick_frames.step_text(lang, "review"))
         tl.wait(cfg["step_title_ms"], "STEP 2 제목 카드")
         for s in sentences:
             k = keys[s.sid]
@@ -253,13 +254,85 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
     return tl
 
 
+# ───────────────────────── 유튜브 메타데이터 ─────────────────────────
+# 영상과 같은 이름의 .json (uploaders.load_meta가 읽음). 렌더링 후 json을 열어 문구를 검수·수정하면 된다.
+META = {
+    "en": dict(
+        title="[{topic}] {group} {learn_type} 블록 스피킹 연습",
+        intro="색깔 블록으로 문장을 하나씩 조립하며 영어로 말해보는 {learn_type} 스피킹 연습!\n"
+              "STEP 1 블록학습으로 문장을 쌓고, STEP 2 이어서 말해보기로 한 번에 말해보세요.",
+        chapters="[타임라인 챕터]",
+        sentences="[오늘의 문장]",
+        tags=["육아영어", "엄마표영어", "영어스피킹", "영어회화", "조립식영어"],
+        learn_type="육아영어",
+    ),
+    "ko": dict(
+        title="[{topic}] Learn Korean with Color Blocks · {group}",
+        intro="Build Korean sentences block by block and say them out loud!\n"
+              "STEP 1: build each sentence. STEP 2: say it all in one go.",
+        chapters="[Chapters]",
+        sentences="[Today's sentences]",
+        tags=["Learn Korean", "Korean speaking", "Korean for parents", "Korean phrases", "Korean practice"],
+        learn_type="",
+    ),
+}
+
+
+def chapters_for_youtube(markers, total_ms):
+    """유튜브 챕터 조건(00:00 시작, 3개 이상, 각 10초 이상)에 맞춤.
+    3초짜리 주제 소개는 첫 문장 챕터에, 4초짜리 아웃트로는 마지막 챕터에 합친다."""
+    body = [(label, ms) for label, ms in markers if label not in ("주제 소개", "아웃트로")]
+    if body:
+        body[0] = (body[0][0], 0)
+    starts = [int(ms // 1000) for _, ms in body] + [int(total_ms // 1000)]
+    problems = []
+    if len(body) < 3:
+        problems.append("챕터가 3개 미만")
+    if any(b - a < sr.YT_CHAPTER_MIN_SEC for a, b in zip(starts, starts[1:])):
+        problems.append("10초 미만 구간 있음")
+    return [{"time": sr.fmt_ts(ms / 1000), "title": label} for label, ms in body], problems
+
+
+def long_meta(topic, group, sentences, tl, sec):
+    m = META[topic.learn_lang]
+    learn_type = topic.learn_type or m["learn_type"]
+    gname = brick_frames.name(topic.learn_lang, group)
+    chapters, problems = chapters_for_youtube(tl.markers, len(tl.audio))
+    tags = list(dict.fromkeys(m["tags"] + [x for x in (learn_type, topic.topic, gname) if x]))
+    lines = "\n".join(f"{s.full} — {s.translation}" for s in sentences)
+    desc = (f"{m['intro'].format(learn_type=learn_type).strip()}\n\n"
+            f"{m['sentences']}\n{lines}\n\n"
+            f"{m['chapters']}\n" + "\n".join(f"{c['time']} {c['title']}" for c in chapters) + "\n\n"
+            + " ".join("#" + t.replace(" ", "") for t in tags[:5]))
+    title = " ".join(m["title"].format(topic=topic.topic, group=gname, learn_type=learn_type).split())
+    return {
+        "kind": "long",
+        "title": title,
+        "description": desc,
+        "tags": tags,
+        "chapters": chapters,
+        "duration_sec": round(sec, 1),
+    }, problems
+
+
 # ───────────────────────── 고수준 API ─────────────────────────
 def output_name(topic, group, layout="landscape"):
     return f"{topic.topic}_{group}_롱폼_16x9.mp4" if layout == "landscape" else f"{topic.topic}_{group}_9x16.mp4"
 
 
+def render_all_long(csv_path, out_dir=ROOT / "output", log=print, progress=lambda f: None):
+    """CSV의 모든 그룹을 그룹당 롱폼 하나로 순서대로 렌더링. 반환: [mp4 경로]."""
+    groups = list(brick_csv.load_brick_csv(csv_path).groups())
+    outs = []
+    for n, g in enumerate(groups):
+        span = 1 / len(groups)
+        out, _, _ = render_long(csv_path, g, out_dir, log, lambda f, b=n * span: progress(b + span * f))
+        outs.append(out)
+    return outs
+
+
 def render_long(csv_path, group=None, out_dir=ROOT / "output", log=print, progress=lambda f: None):
-    """그룹 하나의 16:9 롱폼 렌더링. 반환: (mp4 경로, 길이 초, 타임라인)."""
+    """그룹 하나의 16:9 롱폼 렌더링 + 같은 이름의 메타데이터 json. 반환: (mp4 경로, 길이 초, 타임라인)."""
     topic = brick_csv.load_brick_csv(csv_path)
     groups = topic.groups()
     group = group or next(iter(groups))
@@ -278,6 +351,14 @@ def render_long(csv_path, group=None, out_dir=ROOT / "output", log=print, progre
     sec = sr.encode(tl, out, log, lambda f: progress(0.15 + 0.85 * f))
     progress(1.0)
 
+    meta, problems = long_meta(topic, group, groups[group], tl, sec)
+    sr.write_meta(out, meta)
+    log("[메타데이터] " + meta["title"])
+    for c in meta["chapters"]:
+        log(f"  {c['time']} {c['title']}")
+    if problems:
+        log(f"  [주의] 유튜브 챕터로 인식되지 않을 수 있음: {', '.join(problems)}")
+
     # 타이밍 검증용 로그 (build/ — 저장소에 올리지 않음)
     debug = sr.BUILD / f"{out.stem}_timeline.json"
     debug.write_text(json.dumps(dict(
@@ -292,11 +373,14 @@ def render_long(csv_path, group=None, out_dir=ROOT / "output", log=print, progre
 def main():
     ap = argparse.ArgumentParser(description="브릭 학습 모드 롱폼 렌더링")
     ap.add_argument("csv")
-    ap.add_argument("--group", help="렌더링할 그룹 (기본: CSV의 첫 그룹)")
+    ap.add_argument("--group", help="이 그룹만 렌더링 (기본: CSV의 모든 그룹을 그룹당 영상 하나로)")
     ap.add_argument("-o", "--out", default=str(ROOT / "output"))
     a = ap.parse_args()
     try:
-        render_long(a.csv, a.group, a.out)
+        if a.group:
+            render_long(a.csv, a.group, a.out)
+        else:
+            render_all_long(a.csv, a.out)
     except brick_csv.BrickCSVError as e:
         print(e)
         sys.exit(1)
