@@ -5,7 +5,8 @@ CSV(brick_csv) -> Edge TTS -> 실제 음성 길이 기준 타임라인 -> brick_
 기존 엔진(shadowing_render)의 TTS 캐시, 무음 처리, Timeline, encode를 그대로 재사용한다 (기존 파일 수정 없음).
 
 흐름 (그룹 하나 = 롱폼 하나, docs/01_개발명세.md 4장)
-  STEP 1 주제 소개 -> STEP 2 문장별 블록 학습 -> STEP 3 이어서 말해보기 -> STEP 4 아웃트로
+  주제 소개 -> STEP 1 문장별 블록학습 -> [STEP 2 제목 카드 1초] -> STEP 2 이어서 말해보기 -> 아웃트로
+  (명세 4장의 STEP 1~4 중 화면에 번호를 붙이는 것은 블록학습과 이어서 말해보기 두 단계)
 
 사용법:
     python brick_render.py <CSV경로> [--group 영아] [-o 출력폴더]
@@ -36,6 +37,7 @@ DEFAULTS = dict(
     en_repeat_shorts=1,
     review_wait_factor=1.5,
     review_after_ms=1000,
+    step_title_ms=1000,      # STEP 1(블록학습)과 STEP 2(이어서 말해보기) 사이 제목 카드
     outro_ms=4000,
     shorts_target_s=175,
 )
@@ -45,8 +47,9 @@ OUTRO_STEPS = (0.0, 0.3, 0.65, 0.85)   # brick_frames 아웃트로의 화면이 
 POP_FRAMES = 8                          # 8프레임 ≈ 0.27초 (lead_pad 0.3초 안에서 끝남)
 POP_START_SCALE = 0.5
 
-# 프레임 디자인(brick_frames.py)이 바뀌면 캐시도 새로 만들도록 소스 해시를 키에 포함
-_FRAMES_VER = hashlib.md5(Path(brick_frames.__file__).read_bytes()).hexdigest()[:8]
+# 프레임 디자인(brick_frames.py, 마이크 아이콘)이 바뀌면 캐시도 새로 만들도록 해시를 키에 포함
+_FRAMES_VER = hashlib.md5(Path(brick_frames.__file__).read_bytes()
+                          + brick_frames.MIC_IMAGE.read_bytes()).hexdigest()[:8]
 
 
 def load_settings(config_path=ROOT / "config.json"):
@@ -187,7 +190,7 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
     # STEP 1 · 주제 소개 (최소 intro_min_ms 유지)
     tl.show(dict(kind="intro", lang=lang, topic=topic.topic, group=group,
                  target=topic.target, situation=topic.situation))
-    tl.mark("STEP 1 주제 소개")
+    tl.mark("주제 소개")
     start = len(tl.audio)
     tl.play(clips[k_topic], f"주제: {topic.topic}")
     rest = cfg["intro_min_ms"] - (len(tl.audio) - start)
@@ -195,17 +198,17 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
         tl.wait(rest, "소개 최소 유지")
 
     def base(s):
-        return dict(lang=lang, topic=topic.topic, group=group, speaker=s.speaker, translation=s.translation,
-                    blocks=tuple((b.text, b.meaning, b.color) for b in s.blocks))
+        return dict(lang=lang, learn_type=topic.learn_type, topic=topic.topic, group=group, speaker=s.speaker,
+                    translation=s.translation, blocks=tuple((b.text, b.meaning, b.color) for b in s.blocks))
 
-    # STEP 2 · 문장별 블록 학습
+    # STEP 1 · 문장별 블록 학습 (명세 4장의 STEP 2. 화면에는 STEP 1로 표시)
     for i, s in enumerate(sentences):
         k = keys[s.sid]
         full = clips[k["full"]]
         learn = dict(base(s), kind="learn")
         log_s = f"문장 {s.sid}"
         tl.show(dict(learn, guide=True))
-        tl.mark(f"STEP 2 {s.full}" if i else f"STEP 2 블록 학습 · {s.full}")
+        tl.mark(f"STEP 1 {s.full}" if i else f"STEP 1 블록학습 · {s.full}")
         tl.play(clips[k["translation"]], f"{log_s} 전체 번역")
         tl.wait(len(full) * cfg["full_ko_wait_factor"], f"{log_s} 전체 정답 길이 x{cfg['full_ko_wait_factor']}")
         for j in range(1, len(s.blocks) + 1):
@@ -224,15 +227,16 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
                     tl.play(seg, f"{log_s} 누적 문장 {j}")
                 tl.wait(len(seg) * cfg["en_wait_factor"], f"{log_s} 따라 말하기 x{cfg['en_wait_factor']}")
 
-    # STEP 3 · 이어서 말해보기 (쇼츠는 없음)
+    # STEP 2 · 이어서 말해보기 (명세 4장의 STEP 3. 쇼츠는 없음). 앞에 제목 카드
     if not shorts:
-        for i, s in enumerate(sentences):
+        tl.show(dict(kind="title", lang=lang, step="review"))
+        tl.mark("STEP 2 이어서 말해보기")
+        tl.wait(cfg["step_title_ms"], "STEP 2 제목 카드")
+        for s in sentences:
             k = keys[s.sid]
             full = clips[k["full"]]
             review = dict(base(s), kind="review")
             tl.show(dict(review, guide=True))
-            if i == 0:
-                tl.mark("STEP 3 이어서 말해보기")
             tl.play(clips[k["translation"]], f"복습 {s.sid} 전체 번역")
             tl.wait(len(full) * cfg["review_wait_factor"], f"복습 {s.sid} 말해보기 x{cfg['review_wait_factor']}")
             tl.show(dict(review, revealed=len(s.blocks)))
@@ -243,7 +247,7 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
     for n, t in enumerate(OUTRO_STEPS):
         tl.show(dict(kind="outro", lang=lang, t=t))
         if n == 0:
-            tl.mark("STEP 4 아웃트로")
+            tl.mark("아웃트로")
         nxt = OUTRO_STEPS[n + 1] if n + 1 < len(OUTRO_STEPS) else 1.0
         tl.wait(cfg["outro_ms"] * (nxt - t), f"아웃트로 t={t}")
     return tl

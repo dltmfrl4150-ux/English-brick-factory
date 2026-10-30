@@ -5,7 +5,7 @@
 레이아웃은 블록이 공개되는 단계와 무관하게 항상 같은 위치·크기 (공개 시 화면 흔들림 없음).
 
 render(spec, layout) -> PIL.Image
-  spec["kind"]: intro | learn | review | outro
+  spec["kind"]: intro | learn | title | review | outro
 """
 from pathlib import Path
 
@@ -50,10 +50,10 @@ def reg(size):
 
 # ───────── 화면 문구 (학습 언어별) ─────────
 UI = {
-    "en": dict(guide="영어로 말해보세요", step2="STEP 2 · 블록 학습", step3="STEP 3 · 이어서 말해보기",
+    "en": dict(guide="영어로 말해보세요", learn="블록학습", review="이어서 말해보기",
                target="대상", situation="상황", outro1="구독과 좋아요 누르고", outro2="같이 매일 연습해요!",
                like="좋아요", sub="구독", subbed="구독중"),
-    "ko": dict(guide="Say it in Korean", step2="STEP 2 · Build the sentence", step3="STEP 3 · Say it all",
+    "ko": dict(guide="Say it in Korean", learn="Build the sentence", review="Say it all",
                target="Target", situation="Situation", outro1="Like & subscribe", outro2="and practice with us every day!",
                like="Like", sub="Subscribe", subbed="Subscribed"),
 }
@@ -65,6 +65,14 @@ NAMES = {
     "ko": {"엄마": "Mom", "아이": "Child", "아빠": "Dad",
            "영아": "Babies (0-3)", "유아": "Preschoolers (4-7)", "초등": "School-age (8+)"},
 }
+
+
+# 화면에 표시하는 단계 번호 (STEP 1 블록학습, STEP 2 이어서 말해보기)
+STEPS = {"learn": 1, "review": 2}
+
+
+def step_text(lang, kind):
+    return f"STEP {STEPS[kind]} {UI[lang][kind]}"
 
 
 def name(lang, value):
@@ -148,10 +156,18 @@ def block_layout(d, blocks, L):
     return bf, mf, boxes
 
 
-def _draw_mic(d, cx, cy):
-    d.rounded_rectangle([cx - 22, cy - 46, cx + 22, cy + 8], 10, fill=MIC)
-    d.rectangle([cx - 5, cy + 8, cx + 5, cy + 30], fill=MIC)
-    d.rounded_rectangle([cx - 32, cy + 28, cx + 32, cy + 38], 3, fill=MIC)
+MIC_IMAGE = Path(__file__).resolve().parent / "assets" / "mic.png"
+MIC_H = 96               # 마이크 아이콘 높이 px (이전 도형 마이크와 비슷한 크기)
+_mic = None
+
+
+def _draw_mic(img, cx, cy):
+    """assets/mic.png (투명 배경)를 (cx, cy) 중심에 붙임."""
+    global _mic
+    if _mic is None:
+        src = Image.open(MIC_IMAGE).convert("RGBA")
+        _mic = src.resize((round(src.width * MIC_H / src.height), MIC_H), Image.LANCZOS)
+    img.paste(_mic, (round(cx - _mic.width / 2), round(cy - 4 - MIC_H / 2)), _mic)
 
 
 def _draw_countdown(d, L, n):
@@ -161,10 +177,12 @@ def _draw_countdown(d, L, n):
     d.text((cx, cy), str(n), font=bold(L["COUNT_SIZE"]), fill=MUTED, anchor="mm")
 
 
-def _draw_header(d, L, spec, step_text):
+def _draw_header(d, L, spec, step):
+    """상단 소제목: '학습종류 | 주제 STEP N 단계명' (학습종류가 없으면 '주제 STEP N 단계명')."""
     lf = reg(L["LABEL_SIZE"])
-    head, tail = spec["topic"], f"{name(spec['lang'], spec['group'])} · {step_text}"
-    one = f"{head}  |  {tail}"
+    head = f"{spec['learn_type']}  |  {spec['topic']}" if spec.get("learn_type") else spec["topic"]
+    tail = step
+    one = f"{head}  {tail}"
     if _tw(d, one, lf) <= L["W"] - 80:
         d.text((L["W"] / 2, L["LABEL_Y"]), one, font=lf, fill=LABEL, anchor="mm")
     else:  # 좁은 화면: 주제 / 진행 단계 두 줄
@@ -181,7 +199,7 @@ def _draw_header(d, L, spec, step_text):
 
 def _draw_learn(img, d, L, spec):
     ui = UI[spec["lang"]]
-    _draw_header(d, L, spec, ui["step3"] if spec["kind"] == "review" else ui["step2"])
+    _draw_header(d, L, spec, step_text(spec["lang"], spec["kind"]))
     blocks = spec["blocks"]
     bf, mf, boxes = block_layout(d, blocks, L)
     revealed, meanings, pop = spec.get("revealed", 0), spec.get("meanings", 0), spec.get("pop", 1.0)
@@ -197,7 +215,7 @@ def _draw_learn(img, d, L, spec):
     if spec.get("countdown"):
         _draw_countdown(d, L, spec["countdown"])
     if spec.get("guide"):
-        _draw_mic(d, L["W"] / 2, L["MIC_Y"])
+        _draw_mic(img, L["W"] / 2, L["MIC_Y"])
         d.text((L["W"] / 2, L["GUIDE_Y"]), ui["guide"], font=reg(L["GUIDE_SIZE"]), fill=GUIDE, anchor="mm")
 
 
@@ -228,6 +246,18 @@ def _draw_intro(d, L, spec):
         for line in _wrap_words(d, f"{label}: {value}", f, W - 200):
             d.text((W / 2, y), line, font=f, fill=SENTENCE, anchor="mm")
             y += L["INFO_SIZE"] * 1.5
+
+
+def _draw_title(d, L, spec):
+    """단계 제목 카드: 'STEP N' + 단계명 (예: STEP 2 / 이어서 말해보기)."""
+    W, H = L["W"], L["H"]
+    ui = UI[spec["lang"]]
+    cy = H * (0.45 if W > H else 0.40)
+    d.text((W / 2, cy - L["TITLE_SIZE"] * 0.75), f"STEP {STEPS[spec['step']]}", font=bold(L["OUTRO_SIZE"]),
+           fill=LABEL, anchor="mm")
+    label = ui[spec["step"]]
+    d.text((W / 2, cy + L["TITLE_SIZE"] * 0.5), label, font=_fit(d, label, L["TITLE_SIZE"], W - 160, 48),
+           fill="#FFFFFF", anchor="mm")
 
 
 def _draw_outro(d, L, spec):
@@ -268,6 +298,8 @@ def render(spec: dict, layout: str = "landscape") -> Image.Image:
         _draw_learn(img, d, L, spec)
     elif kind == "intro":
         _draw_intro(d, L, spec)
+    elif kind == "title":
+        _draw_title(d, L, spec)
     elif kind == "outro":
         _draw_outro(d, L, spec)
     else:

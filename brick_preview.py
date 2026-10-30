@@ -11,7 +11,7 @@ import brick_csv, brick_frames as bf
 def scenes(t, sid):
     s = next(x for x in t.sentences if x.sid == sid)
     blocks = tuple((b.text, b.meaning, b.color) for b in s.blocks)
-    base = dict(lang=t.learn_lang, topic=t.topic, group=s.group, speaker=s.speaker,
+    base = dict(lang=t.learn_lang, learn_type=t.learn_type, topic=t.topic, group=s.group, speaker=s.speaker,
                 translation=s.translation, blocks=blocks)
     n = len(blocks)
     return [
@@ -21,6 +21,7 @@ def scenes(t, sid):
         ("04_1번공개", dict(base, kind="learn", meanings=1, revealed=1)),
         ("05_2번뜻_카운트5", dict(base, kind="learn", meanings=2, revealed=1, countdown=5)),
         ("06_전체공개", dict(base, kind="learn", meanings=n, revealed=n)),
+        ("07_복습_제목", dict(kind="title", lang=t.learn_lang, step="review")),
         ("07_복습_빈블록", dict(base, kind="review", guide=True)),
         ("08_복습_공개", dict(base, kind="review", revealed=n)),
         ("09_아웃트로", dict(kind="outro", lang=t.learn_lang, t=1.0)),
