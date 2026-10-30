@@ -1,0 +1,19 @@
+# 영어브릭 섀도잉 영상 런처
+# 외부 프로그램: ffmpeg / ffprobe 가 PATH에 있어야 함 (https://www.gyan.dev/ffmpeg/builds/)
+# 글꼴: Windows 기본 글꼴(맑은 고딕, Segoe UI, Segoe UI Emoji) 사용
+# GUI: tkinter (Python 기본 포함)
+
+# 렌더링
+edge-tts>=6.1
+pydub>=0.25
+audioop-lts>=0.2; python_version >= "3.13"   # pydub이 쓰는 audioop이 3.13에서 제거됨
+Pillow>=10.1
+numpy>=1.26
+
+# YouTube 업로드
+google-api-python-client>=2.100
+google-auth-oauthlib>=1.1
+google-auth-httplib2>=0.1
+
+# Instagram Graph API
+requests>=2.31
