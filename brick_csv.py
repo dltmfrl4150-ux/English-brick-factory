@@ -2,7 +2,8 @@
 브릭 학습 모드 — 새 형식 CSV 읽기 · 검증 · 블록 색상 지정
 
 CSV 형식 (한 행 = 블록 하나, UTF-8)
-  learn_type (선택, 예: 육아영어)          : 파일 첫 행에만. 화면 상단 소제목에 표시
+  learn_type (선택, 예: 육아영어)          : 파일 첫 행에만. 화면 상단 소제목·섬네일에 표시
+  subtitle (선택, 예: 엄마와 아이 아침루틴) : 파일 첫 행에만. 섬네일 부제 (없으면 target)
   topic, target, situation, learn_lang      : 파일 첫 행에만
   group, sentence_id, speaker               : 모든 행
   block_order, block_text, block_meaning, category : 모든 행
@@ -79,6 +80,7 @@ class Topic:
     situation: str
     learn_lang: str
     learn_type: str = ""   # 학습 종류 (예: 육아영어). 없으면 상단 소제목에서 생략
+    subtitle: str = ""     # 섬네일 부제. 없으면 target
     sentences: list = field(default_factory=list)
 
     def groups(self) -> "OrderedDict[str, list]":
@@ -130,7 +132,7 @@ def load_brick_csv(path) -> Topic:
 
     first = rows[0]
     topic = Topic(first["topic"], first["target"], first["situation"], first["learn_lang"].lower(),
-                  first.get("learn_type", ""))
+                  first.get("learn_type", ""), first.get("subtitle", ""))
     if not topic.topic:
         problems.append("첫 행에 topic이 없습니다.")
     if topic.learn_lang not in LEARN_LANGS:

@@ -23,6 +23,7 @@ from tkinter.scrolledtext import ScrolledText
 
 import brick_csv
 import brick_render
+import brick_thumbnail
 import shadowing_render as render
 import thumbnail
 import uploaders
@@ -442,9 +443,13 @@ class Launcher(tk.Tk):
             return
 
         def job(log, progress):
-            topic = (brick_csv.load_brick_csv(csv).topic if brick_csv.is_brick_csv(csv)
-                     else render.load_topic(csv))
-            png = thumbnail.make_thumbnail(csv, self.out_dir() / f"{topic}_섬네일.png", title=topic)
+            if brick_csv.is_brick_csv(csv):
+                topic = brick_csv.load_brick_csv(csv).topic
+                png = brick_thumbnail.make_thumbnail(csv, self.out_dir() / f"{topic}_섬네일.png")
+                log(f"[섬네일] {png}")
+                return png
+            topic = render.load_topic(csv)
+            png = thumbnail.make_thumbnail(csv, self.out_dir() / f"{topic}_섬네일.png")
             log(f"[섬네일] {png}")
             return png
         self.run_job("롱폼 섬네일 생성", job, on_done=open_path)
