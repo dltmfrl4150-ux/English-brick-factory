@@ -15,7 +15,7 @@
 | M2 | 화면 시안 (`brick_frames.py`, `brick_preview.py`, `preview/`) | 완료, 사용자 승인 |
 | M3 | 음성 + 타임라인 + 롱폼 렌더링 (`brick_render.py`, 영어학습 영아 그룹) | 완료, 사용자 승인 (2026-10-30) |
 | M4 | 전체 그룹 롱폼, 한국어학습용, 메타데이터 json | 완료, 사용자 승인 (2026-10-30) |
-| **M5** | **쇼츠 배분과 출력** | **다음 작업** |
+| **M5** | **쇼츠 배분과 출력** | **구현 완료, 사용자 승인 대기** |
 | M6 | 런처(GUI) 연결, 설정 항목 | 대기 |
 
 테스트 데이터: `data/아침깨우기_영어학습.csv` (영아 그룹 7문장만, 사용자 확인본), `data/아침깨우기_한국어학습.csv` (영아·유아·초등 21문장)
@@ -46,6 +46,7 @@ python brick_csv.py data/아침깨우기_영어학습.csv            # CSV 검�
 python brick_preview.py preview data/아침깨우기_영어학습.csv data/아침깨우기_한국어학습.csv   # 화면 시안 PNG
 python brick_render.py data/아침깨우기_한국어학습.csv       # 모든 그룹 롱폼 + 메타데이터 json (output/, 타이밍 로그는 build/)
 python brick_render.py data/아침깨우기_영어학습.csv --group 영아   # 그룹 하나만
+python brick_render.py data/아침깨우기_한국어학습.csv --format shorts   # 쇼츠 (long | shorts | all)
 python shadowing_render.py --help                            # 기존(구) 섀도잉 모드 CLI
 ```
 
