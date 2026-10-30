@@ -1,0 +1,18 @@
+﻿topic,target,situation,learn_lang,group,sentence_id,speaker,block_order,block_text,block_meaning,category,full_sentence,full_translation,direction,needs_review
+아침 깨우기,엄마와 아이,아침에 아이를 깨우고 하루를 시작해요,en,영아,1,엄마,1,"Good morning,","좋은 아침,",GRAY,"Good morning, sunshine!","좋은 아침, 우리 햇살!",환하게 웃으며 인사,
+,,,,영아,1,엄마,2,sunshine!,우리 햇살!,GRAY,,,,
+,,,,영아,2,엄마,1,"It’s time to wake up,","일어날 시간이야,",RED,"It’s time to wake up, sweetie.","일어날 시간이야, 우리 아가.",부드럽게 쓰다듬으며,Y
+,,,,영아,2,엄마,2,sweetie.,우리 아가.,GRAY,,,,
+,,,,영아,3,엄마,1,Did you sleep,잤어?,RED,Did you sleep well last night?,어젯밤에 푹 잤어?,아이와 눈을 맞추며,
+,,,,영아,3,엄마,2,well,푹,GRAY,,,,
+,,,,영아,3,엄마,3,last night?,어젯밤에,GREEN,,,,
+,,,,영아,4,엄마,1,Let’s open,열자,RED,Let’s open the curtains.,우리 커튼 열자.,커튼을 걷으며,
+,,,,영아,4,엄마,2,the curtains.,커튼,ORANGE,,,,
+,,,,영아,5,엄마,1,The sun is shining,햇님이 반짝이네,RED,The sun is shining outside.,밖에 햇님이 반짝반짝 빛나네.,창밖을 가리키며,
+,,,,영아,5,엄마,2,outside.,밖에,YELLOW,,,,
+,,,,영아,6,엄마,1,Let’s change,갈자,RED,Let’s change your diaper first.,먼저 기저귀부터 갈자.,기저귀를 꺼내며,
+,,,,영아,6,엄마,2,your diaper,네 기저귀,ORANGE,,,,
+,,,,영아,6,엄마,3,first.,먼저,GREEN,,,,
+,,,,영아,7,엄마,1,Let’s go,가자,RED,Let’s go to the kitchen for some yummy milk.,맛있는 맘마 먹으러 부엌에 가자.,아이를 안아 올리며,
+,,,,영아,7,엄마,2,to the kitchen,부엌으로,YELLOW,,,,
+,,,,영아,7,엄마,3,for some yummy milk.,맛있는 우유 먹으러,BLUE,,,,
