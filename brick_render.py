@@ -37,8 +37,10 @@ DEFAULTS = dict(
     first_block_countdown_s=3,
     next_block_countdown_s=5,
     en_wait_factor=1.5,
-    en_repeat_long=2,
-    en_repeat_shorts=1,
+    block_repeat_long=1,     # 누적 문장(완성 전) 재생 횟수
+    final_repeat_long=2,     # 완성 문장 재생 횟수
+    block_repeat_shorts=1,
+    final_repeat_shorts=1,
     review_wait_factor=1.5,
     review_after_ms=1000,
     step_title_ms=1000,      # STEP 1(블록학습)과 STEP 2(이어서 말해보기) 사이 제목 카드
@@ -193,14 +195,16 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
         keys[s.sid] = dict(
             translation=clips.need(s.translation, mv),
             full=clips.need(s.full, lv),
-            meaning=[clips.need(s.meaning_prefix(k), mv) for k in range(1, n + 1)],
+            # 마지막 블록의 누적 뜻은 블록 뜻을 잇지 않고 원래 번역 음성 (translation)을 쓴다
+            meaning=[clips.need(s.meaning_prefix(k), mv) for k in range(1, n)],
             prefix=[clips.need(s.prefix(k), lv) for k in range(1, n + 1)],
         )
     clips.build(log)
 
     FRAME_DIR.mkdir(parents=True, exist_ok=True)
     tl = BrickTimeline(layout, cfg["lead_pad_ms"], dry)
-    repeat = cfg["en_repeat_shorts"] if shorts else cfg["en_repeat_long"]
+    mode = "shorts" if shorts else "long"
+    block_repeat, final_repeat = cfg[f"block_repeat_{mode}"], cfg[f"final_repeat_{mode}"]
 
     # STEP 1 · 주제 소개 (최소 intro_min_ms 유지, 쇼츠는 짧게)
     tl.show(dict(kind="intro", lang=lang, topic=topic.topic, group=group,
@@ -226,16 +230,21 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
         tl.mark(f"{brick_frames.step_text(lang, 'learn')} · {s.full}" if i == 0 else s.full)
         tl.play(clips[k["translation"]], f"{log_s} 전체 번역")
         tl.wait(len(full) * cfg["full_ko_wait_factor"], f"{log_s} 전체 정답 길이 x{cfg['full_ko_wait_factor']}")
-        for j in range(1, len(s.blocks) + 1):
-            # j번 뜻 추가 -> 누적 뜻 음성 -> 카운트다운
+        n = len(s.blocks)
+        for j in range(1, n + 1):
+            last = j == n
+            # j번 뜻 추가 -> 누적 뜻 음성 (마지막은 원래 번역 음성) -> 카운트다운
             shown = dict(learn, meanings=j, revealed=j - 1)
             tl.show(shown)
-            tl.play(clips[k["meaning"][j - 1]], f"{log_s} 누적 뜻 {j}")
+            if last:
+                tl.play(clips[k["translation"]], f"{log_s} 누적 뜻 {j} (원래 번역)")
+            else:
+                tl.play(clips[k["meaning"][j - 1]], f"{log_s} 누적 뜻 {j}")
             tl.countdown(shown, cfg["first_block_countdown_s"] if j == 1 else cfg["next_block_countdown_s"])
-            # j번 블록 공개(팝업) -> 누적 문장 음성 반복
+            # j번 블록 공개(팝업) -> 누적 문장 음성 (완성 문장만 반복)
             seg = clips[k["prefix"][j - 1]]
             tl.show(dict(learn, meanings=j, revealed=j), pop=True)
-            for r in range(repeat):
+            for r in range(final_repeat if last else block_repeat):
                 if r:
                     tl.play(seg, f"{log_s} 누적 문장 {j} (반복)")
                 else:
