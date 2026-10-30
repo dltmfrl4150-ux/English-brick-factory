@@ -44,6 +44,7 @@ DEFAULTS = dict(
     review_wait_factor=1.5,
     review_after_ms=1000,
     step_title_ms=1000,      # STEP 1(블록학습)과 STEP 2(이어서 말해보기) 사이 제목 카드
+    room_tone=False,         # True면 무음 구간을 기존 엔진의 -64dBFS 잡음으로 채움 (블루투스 절전 방지용)
     outro_ms=4000,
     shorts_target_s=175,
 )
@@ -139,10 +140,11 @@ def render_frame(spec, layout):
 class BrickTimeline(sr.Timeline):
     """기존 Timeline에서 show()/play()만 재정의: brick_frames로 그리고, 음성 뒤 유지 여백 없음."""
 
-    def __init__(self, layout, lead_pad_ms, dry=False):
+    def __init__(self, layout, lead_pad_ms, dry=False, room_tone=False):
         super().__init__()
         self.layout = layout
         self.lead_pad_ms = lead_pad_ms
+        self.room_tone = room_tone
         self.dry = dry     # True면 프레임을 그리지 않고 길이만 계산 (쇼츠 배분용)
         self.events = []   # (시작 ms, 설명) — 타이밍 검증용 로그
 
@@ -171,6 +173,13 @@ class BrickTimeline(sr.Timeline):
         self.silence(self.lead_pad_ms)
         self.log_event(f"음성 {len(seg)}ms {label}")
         self.audio += seg
+
+    def silence(self, ms):
+        """기본은 완전한 무음. 기존 엔진의 잡음(룸톤)이 대기 중 '쉬-' 소리로 들려서 꺼 둠."""
+        if self.room_tone:
+            super().silence(ms)
+        else:
+            self.audio += sr.AudioSegment.silent(duration=int(ms), frame_rate=sr.SAMPLE_RATE)
 
     def wait(self, ms, label=""):
         self.log_event(f"대기 {int(ms)}ms {label}")
@@ -202,7 +211,7 @@ def build_timeline(topic, group, sentences, voices, cfg, layout="landscape", sho
     clips.build(log)
 
     FRAME_DIR.mkdir(parents=True, exist_ok=True)
-    tl = BrickTimeline(layout, cfg["lead_pad_ms"], dry)
+    tl = BrickTimeline(layout, cfg["lead_pad_ms"], dry, bool(cfg["room_tone"]))
     mode = "shorts" if shorts else "long"
     block_repeat, final_repeat = cfg[f"block_repeat_{mode}"], cfg[f"final_repeat_{mode}"]
 
