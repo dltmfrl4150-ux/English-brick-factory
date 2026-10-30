@@ -311,7 +311,7 @@ def chapters_for_youtube(markers, total_ms):
     return [{"time": sr.fmt_ts(ms / 1000), "title": label} for label, ms in body], problems
 
 
-def long_meta(topic, group, sentences, tl, sec):
+def long_meta(topic, group, sentences, tl, sec, thumbnail_path):
     m = META[topic.learn_lang]
     learn_type = topic.learn_type or m["learn_type"]
     gname = brick_frames.name(topic.learn_lang, group)
@@ -328,6 +328,7 @@ def long_meta(topic, group, sentences, tl, sec):
         "title": title,
         "description": desc,
         "tags": tags,
+        "thumbnail": str(thumbnail_path),   # 런처 '섬네일 생성'으로 만든 파일. 없으면 업로드 시 건너뜀
         "chapters": chapters,
         "duration_sec": round(sec, 1),
     }, problems
@@ -480,7 +481,7 @@ def render_long(csv_path, group=None, out_dir=ROOT / "output", log=print, progre
     sec = sr.encode(tl, out, log, lambda f: progress(0.15 + 0.85 * f))
     progress(1.0)
 
-    meta, problems = long_meta(topic, group, sentences, tl, sec)
+    meta, problems = long_meta(topic, group, sentences, tl, sec, out.parent / f"{topic.topic}_섬네일.png")
     sr.write_meta(out, meta)
     log("[메타데이터] " + meta["title"])
     for c in meta["chapters"]:

@@ -1,7 +1,8 @@
 """
 영어브릭 섀도잉 영상 런처 (tkinter)
 
-[제작] 탭: CSV 선택 / TTS 음성 / 16:9 롱폼 · 9:16 숏폼 3종 렌더링 / 섬네일 / 검수 후 업로드
+[제작] 탭: CSV 선택 / TTS 음성 / 16:9 롱폼 · 9:16 숏폼 렌더링 / 섬네일 / 검수 후 업로드
+  CSV 헤더에 block_text 열이 있으면 브릭 학습 모드(brick_render), 아니면 구 섀도잉 모드(shadowing_render)
 [계정 · API 설정] 탭: YouTube OAuth, Instagram Graph API 토큰
 하단: 진행 바 + 실시간 로그
 
@@ -20,6 +21,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
+import brick_csv
+import brick_render
 import shadowing_render as render
 import thumbnail
 import uploaders
@@ -32,6 +35,7 @@ DEFAULT_CONFIG = {
     "output_dir": str(render.DEFAULT_OUT),
     "voices": dict(render.DEFAULT_VOICES),
     "shorts_compact": True,
+    "brick": dict(brick_render.DEFAULTS),   # 브릭 모드 타이밍 (config.json에서 직접 수정)
     "youtube": {
         "client_secret": "",
         "token_path": str(ROOT / "credentials" / "youtube_token.json"),
@@ -147,10 +151,14 @@ class Launcher(tk.Tk):
         ttk.Label(f, text="CSV 대본").grid(row=0, column=0, sticky="w")
         ttk.Entry(f, textvariable=self.var("csv_path")).grid(row=0, column=1, sticky="ew", padx=6)
         ttk.Button(f, text="CSV 선택…", command=self.pick_csv).grid(row=0, column=2)
-        ttk.Label(f, text="출력 폴더").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Entry(f, textvariable=self.var("output_dir")).grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
+        self.csv_mode = tk.StringVar()
+        ttk.Label(f, textvariable=self.csv_mode, foreground="#0B5394").grid(row=1, column=1, sticky="w", padx=6)
+        self.vars["csv_path"].trace_add("write", lambda *_: self.update_csv_mode())
+        self.update_csv_mode()
+        ttk.Label(f, text="출력 폴더").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(f, textvariable=self.var("output_dir")).grid(row=2, column=1, sticky="ew", padx=6, pady=(6, 0))
         btns = ttk.Frame(f)
-        btns.grid(row=1, column=2, pady=(6, 0))
+        btns.grid(row=2, column=2, pady=(6, 0))
         ttk.Button(btns, text="변경…", command=self.pick_out_dir).pack(side="left")
         ttk.Button(btns, text="출력 폴더 열기", command=self.open_out_dir).pack(side="left", padx=(4, 0))
 
@@ -174,15 +182,19 @@ class Launcher(tk.Tk):
         btn_row = ttk.Frame(f)
         btn_row.pack(fill="x")
         for text, cmd in [("① 16:9 롱폼 렌더링", self.do_render_long),
-                          ("② 9:16 숏폼 3종 렌더링", self.do_render_shorts),
+                          ("② 9:16 숏폼 렌더링", self.do_render_shorts),
                           ("⑤ 롱폼 섬네일 생성", self.do_thumbnail)]:
             b = ttk.Button(btn_row, text=text, style="Big.TButton", command=cmd)
             b.pack(side="left", expand=True, fill="x", padx=3)
             self.action_buttons.append(b)
         ttk.Checkbutton(f, variable=self.var("shorts_compact", tk.BooleanVar), text=(
-            "숏폼 3분 압축 모드 (YouTube Shorts용) — 모든 Phase 유지, Phase 2·3 문장당 1회, "
+            "[구 섀도잉 모드] 숏폼 3분 압축 모드 (YouTube Shorts용) — 모든 Phase 유지, Phase 2·3 문장당 1회, "
             "안내 카드 생략, 여백 축소, 필요 시 대기 배수 자동 조정(최소 1.5배)")).pack(
             anchor="w", padx=3, pady=(6, 0))
+        ttk.Label(f, foreground="#666", wraplength=900, justify="left", text=(
+            "[브릭 모드] 롱폼은 그룹마다 1편, 숏폼은 그룹마다 175초 이하로 나눠 여러 편을 만듭니다. "
+            f"대기 배수·카운트다운 등은 {CONFIG_PATH.name}의 \"brick\" 항목에서 바꿉니다.")).pack(
+            anchor="w", padx=3, pady=(4, 0))
 
         # 4. 업로드 (렌더링과 분리)
         f = ttk.LabelFrame(parent, text="SNS 업로드 — 출력 폴더에서 검수한 파일만 선택해서 업로드", padding=8)
@@ -253,6 +265,25 @@ class Launcher(tk.Tk):
                                        initialdir=Path(self.vars["csv_path"].get()).parent)
         if p:
             self.vars["csv_path"].set(p)
+
+    def update_csv_mode(self):
+        """CSV 형식(브릭 / 구 섀도잉)과 요약을 CSV 경로 아래에 표시."""
+        p = Path(self.vars["csv_path"].get())
+        if not p.is_file():
+            self.csv_mode.set("CSV 형식: -")
+            return
+        try:
+            if not brick_csv.is_brick_csv(p):
+                self.csv_mode.set("CSV 형식: 구 섀도잉 모드")
+                return
+            t = brick_csv.load_brick_csv(p)
+            lang = {"en": "영어학습", "ko": "한국어학습"}[t.learn_lang]
+            groups = ", ".join(f"{g} {len(ss)}문장" for g, ss in t.groups().items())
+            self.csv_mode.set(f"CSV 형식: 브릭 학습 모드 · {lang} · {groups}")
+        except brick_csv.BrickCSVError as e:
+            self.csv_mode.set(f"CSV 형식: 브릭 학습 모드 · 검증 오류 {len(e.problems)}개 (렌더링 시 로그 확인)")
+        except (OSError, UnicodeDecodeError) as e:
+            self.csv_mode.set(f"CSV 형식: 읽기 실패 ({e})")
 
     def pick_out_dir(self):
         p = filedialog.askdirectory(title="출력 폴더 선택", initialdir=self.vars["output_dir"].get())
@@ -384,14 +415,22 @@ class Launcher(tk.Tk):
 
     def do_render_long(self):
         csv = self.csv_path()
-        if csv:
+        if csv and brick_csv.is_brick_csv(csv):
+            out = self.out_dir()
+            self.run_job("16:9 롱폼 렌더링 (브릭 · 그룹별)",
+                         lambda log, progress: brick_render.render_all_long(csv, out, log, progress))
+        elif csv:
             out, voices = self.out_dir(), dict(self.cfg["voices"])
             self.run_job("16:9 롱폼 렌더링",
                          lambda log, progress: render.render_long(csv, out, voices, log, progress))
 
     def do_render_shorts(self):
         csv = self.csv_path()
-        if csv:
+        if csv and brick_csv.is_brick_csv(csv):
+            out = self.out_dir()
+            self.run_job("9:16 숏폼 렌더링 (브릭 · 175초 이하 배분)",
+                         lambda log, progress: brick_render.render_all_shorts(csv, out, log, progress))
+        elif csv:
             out, voices = self.out_dir(), dict(self.cfg["voices"])
             compact = bool(self.cfg["shorts_compact"])
             self.run_job("9:16 숏폼 3종 렌더링" + (" (3분 압축)" if compact else ""),
@@ -403,8 +442,9 @@ class Launcher(tk.Tk):
             return
 
         def job(log, progress):
-            topic = render.load_topic(csv)
-            png = thumbnail.make_thumbnail(csv, self.out_dir() / f"{topic}_섬네일.png")
+            topic = (brick_csv.load_brick_csv(csv).topic if brick_csv.is_brick_csv(csv)
+                     else render.load_topic(csv))
+            png = thumbnail.make_thumbnail(csv, self.out_dir() / f"{topic}_섬네일.png", title=topic)
             log(f"[섬네일] {png}")
             return png
         self.run_job("롱폼 섬네일 생성", job, on_done=open_path)
